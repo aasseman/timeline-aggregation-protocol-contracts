@@ -4,6 +4,7 @@ pragma solidity ^0.8.18;
 
 import "forge-std/Test.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {TAPVerifier} from "../src/TAPVerifier.sol";
 import {Collateral} from "../src/Collateral.sol";
 import {MockERC20Token} from "./MockERC20Token.sol";
@@ -46,7 +47,15 @@ contract CollateralContractTest is Test {
         assert(mockERC20.transfer(SENDER_ADDRESS, 10000000));
 
         collateralContract =
-        new Collateral(address(mockERC20), address(staking), address(tap_verifier), address(allocationIDTracker), WITHDRAW_COLLATERAL_FREEZE_PERIOD, REVOKE_SIGNER_FREEZE_PERIOD);
+        new Collateral(
+            address(mockERC20),
+            address(staking),
+            address(tap_verifier),
+            address(allocationIDTracker),
+            WITHDRAW_COLLATERAL_FREEZE_PERIOD,
+            REVOKE_SIGNER_FREEZE_PERIOD,
+            3 days,
+            address(this));
 
         // Approve staking contract to transfer tokens from the collateral contract
         collateralContract.approveAll();
@@ -88,7 +97,7 @@ contract CollateralContractTest is Test {
     }
 
     function testDepositFunds() public {
-        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT);
+        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT, true);
 
         vm.prank(SENDER_ADDRESS);
         uint256 depositedAmount = collateralContract.getCollateralAmount(SENDER_ADDRESS, receiverAddress);
@@ -97,7 +106,7 @@ contract CollateralContractTest is Test {
     }
 
     function testWithdrawFundsAfterFreezePeriod() public {
-        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT);
+        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT, true);
 
         // Sets msg.sender address for next contract calls until stop is called
         vm.startPrank(SENDER_ADDRESS);
@@ -121,7 +130,7 @@ contract CollateralContractTest is Test {
     }
 
     function testRedeemRAVSignedByAuthorizedSigner() public {
-        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT);
+        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT, true);
         uint256 remainingCollateral = collateralContract.getCollateralAmount(SENDER_ADDRESS, receiverAddress);
         assertEq(remainingCollateral, COLLATERAL_AMOUNT, "Incorrect remaining collateral");
 
@@ -195,14 +204,14 @@ contract CollateralContractTest is Test {
     }
 
     function testGetCollateralAmount() public {
-        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT);
+        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT, true);
 
         uint256 depositedAmount = collateralContract.getCollateralAmount(SENDER_ADDRESS, receiverAddress);
         assertEq(depositedAmount, COLLATERAL_AMOUNT, "Incorrect deposited amount");
     }
 
     function testMultipleThawRequests() public {
-        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT);
+        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT, true);
         uint256 partialCollateralAmount = COLLATERAL_AMOUNT / 10;
         uint256 partialFreezePeriod = WITHDRAW_COLLATERAL_FREEZE_PERIOD / 10;
         uint256 expectedThawEnd = 0;
@@ -240,7 +249,7 @@ contract CollateralContractTest is Test {
 
     // test that the contract reverts when allocation ID is used more than once
     function testRevertOnDuplicateAllocationID() public {
-        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT);
+        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT, true);
         uint256 remainingCollateral = collateralContract.getCollateralAmount(SENDER_ADDRESS, receiverAddress);
         assertEq(remainingCollateral, COLLATERAL_AMOUNT, "Incorrect remaining collateral");
 
@@ -298,7 +307,7 @@ contract CollateralContractTest is Test {
         // create additional sender address to test that the contract does not revert when redeeming same allocation ID with a different sender
         address secondSenderAddress = address(0xa789);
         assert(mockERC20.transfer(secondSenderAddress, 10000000));
-        depositCollateral(secondSenderAddress, receiverAddress, COLLATERAL_AMOUNT);
+        depositCollateral(secondSenderAddress, receiverAddress, COLLATERAL_AMOUNT, true);
 
         // should not revert when redeeming same allocationID with a different sender
         authorizeSignerWithProof(secondSenderAddress, authorizedSignerPrivateKeys[1], authorizedsigners[1]);
@@ -326,7 +335,7 @@ contract CollateralContractTest is Test {
     }
 
     function testRevokeAuthorizedSigner() public {
-        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT);
+        depositCollateral(SENDER_ADDRESS, receiverAddress, COLLATERAL_AMOUNT, true);
 
         authorizeSignerWithProof(SENDER_ADDRESS, authorizedSignerPrivateKeys[0], authorizedsigners[0]);
         vm.prank(SENDER_ADDRESS);
@@ -371,6 +380,34 @@ contract CollateralContractTest is Test {
         );
     }
 
+    function testAccessControlledFunctions() public {
+        string memory expectedErrorMessage = string(
+            abi.encodePacked(
+                "AccessControl: account ",
+                Strings.toHexString(SENDER_ADDRESS),
+                " is missing role ",
+                Strings.toHexString(uint256(collateralContract.AUTHORIZED_SENDER()), 32)
+            )
+        );
+        // Call functions as sender (who currently has no role and is not authorized to call these functions)
+        vm.startPrank(SENDER_ADDRESS);
+
+        vm.expectRevert(bytes(expectedErrorMessage));
+        collateralContract.deposit(receiverAddress, 10);
+        vm.expectRevert(bytes(expectedErrorMessage));
+        collateralContract.thaw(receiverAddress, 10);
+        vm.expectRevert(bytes(expectedErrorMessage));
+        collateralContract.withdraw(receiverAddress);
+        vm.expectRevert(bytes(expectedErrorMessage));
+        collateralContract.authorizeSigner(authorizedsigners[0], bytes("test"));
+        vm.expectRevert(bytes(expectedErrorMessage));
+        collateralContract.thawSigner(authorizedsigners[0]);
+        vm.expectRevert(bytes(expectedErrorMessage));
+        collateralContract.revokeAuthorizedSigner(authorizedsigners[0]);
+
+        vm.stopPrank();
+    }
+
     function authorizeSignerWithProof(address sender, uint256 signerPivateKey, address signer) private {
         bytes memory authSignerAuthorizesSenderProof = createAuthorizedSignerProof(sender, signerPivateKey);
 
@@ -402,7 +439,10 @@ contract CollateralContractTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
-    function depositCollateral(address sender, address receiver, uint256 amount) public {
+    function depositCollateral(address sender, address receiver, uint256 amount, bool grantRole) public {
+        if( grantRole && !collateralContract.hasRole(collateralContract.AUTHORIZED_SENDER(), sender) ) {
+            collateralContract.grantRole(collateralContract.AUTHORIZED_SENDER(), sender);
+        }
         // Sets msg.sender address for next contract calls until stop is called
         vm.startPrank(sender);
         // Approve the collateral contract to transfer tokens from the sender
