@@ -12,14 +12,14 @@ import {IStaking} from "./IStaking.sol";
 
 /**
  * @title Collateral
- * @dev This contract allows `senders` to deposit collateral for specific `receivers`,
+ * @dev This contract allows `senders` who are whitelisted to deposit collateral for specific `receivers`,
  *      which can later be redeemed using Receipt Aggregate Vouchers (`RAV`) signed
  *      by an authorized `signer`. `Senders` can deposit collateral for `receivers`,
  *      authorize `signers` to create signed `RAVs`, and withdraw collateral after a
  *      set `thawingPeriod` number of seconds. `Receivers` can redeem signed `RAVs` to
  *      claim collateral.
  * @notice This contract uses the `TAPVerifier` contract for recovering signer addresses
- *         from `RAVs`.
+ *         from `RAVs`. AccessControlDefaultAdminRules is used for managing sender authorization.
  */
 contract Collateral is AccessControlDefaultAdminRules {
     using SafeERC20 for IERC20;
@@ -191,6 +191,7 @@ contract Collateral is AccessControlDefaultAdminRules {
      * @param receiver Address of the receiver.
      * @param amount Amount of collateral to deposit.
      * @notice The collateral must be approved for transfer by the sender.
+     * @notice The msg.sender must be an authorized sender.
      * @notice REVERT: this function will revert if the collateral transfer fails.
      */
     function deposit(
@@ -206,6 +207,7 @@ contract Collateral is AccessControlDefaultAdminRules {
      * @dev Requests to thaw a specific amount of collateral from a receiver's collateral account.
      * @param receiver Address of the receiver the collateral account is for.
      * @param amount Amount of collateral to thaw.
+     * @notice The msg.sender must be an authorized sender.
      * @notice REVERT with error:
      *               - InsufficientCollateral: if the sender receiver collateral account does
      *                 not have enough collateral (greater than `amount`)
@@ -246,6 +248,7 @@ contract Collateral is AccessControlDefaultAdminRules {
     /**
      * @dev Withdraws all thawed collateral from a receiver's collateral account.
      * @param receiver Address of the receiver.
+     * @notice The msg.sender must be an authorized sender.
      * @notice REVERT with error:
      *               - CollateralNotThawing: There is no collateral currently thawing
      *               - CollateralStillThawing: ThawEndTimestamp has not been reached
@@ -284,6 +287,7 @@ contract Collateral is AccessControlDefaultAdminRules {
      * @dev Authorizes a signer to sign RAVs for the sender.
      * @param signer Address of the authorized signer.
      * @param proof The proof provided by the signer to authorize the sender.
+     * @notice The msg.sender must be an authorized sender.
      * @notice REVERT with error:
      *               - SignerAlreadyAuthorized: Signer is currently authorized for a sender
      *               - InvalidSignerProof: The provided signer proof is invalid
@@ -309,6 +313,7 @@ contract Collateral is AccessControlDefaultAdminRules {
     /**
      * @dev Starts thawing a signer to be removed from the authorized signers list.
      * @param signer Address of the signer to remove.
+     * @notice The msg.sender must be an authorized sender.
      * @notice REVERT with error:
      *               - SignerNotAuthorizedBySender: The provided signer is either not authorized or
      *                 authorized by a different sender
@@ -336,6 +341,7 @@ contract Collateral is AccessControlDefaultAdminRules {
     /**
      * @dev Revokes a signer from the authorized signers list if thawed.
      * @param signer Address of the signer to remove.
+     * @notice The msg.sender must be an authorized sender.
      * @notice REVERT with error:
      *               - SignerNotAuthorizedBySender: The provided signer is either not authorized or
      *                 authorized by a different sender
