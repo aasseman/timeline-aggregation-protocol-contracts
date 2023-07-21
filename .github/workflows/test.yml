@@ -26,6 +26,11 @@ jobs:
         with:
           version: nightly
 
+      # Print contents of the `test/Collateral.t.sol` file
+      - name: Print test file
+        run: |
+          cat test/Collateral.t.sol
+
       - name: Run Forge build
         run: |
           forge --version
